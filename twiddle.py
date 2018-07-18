@@ -62,28 +62,41 @@ class Twiddle(object):
             # order is inhibit then enable
             digital_out.write([False, True], auto_start=True)
 
+            totaldur = self.duration + self.params['DAQ', 'Pretrigger duration']
             # analog input
-            n_in_samples = int(self.duration * self.params['DAQ', 'Input', 'Sampling frequency'])
-
+            n_in_samples = int(totaldur * self.params['DAQ', 'Input', 'Sampling frequency'])
+            n_in_pre_samples = int(self.params['DAQ', 'Pretrigger duration'] *
+                                   self.params['DAQ', 'Input', 'Sampling frequency'])
             aichans = [self.params['DAQ','Input', c] for c in ['SG0', 'SG1', 'SG2', 'SG3', 'SG4', 'SG5']]
             for aichan1 in aichans:
                 analog_in.ai_channels.add_ai_voltage_chan(aichan1)
             analog_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Sampling frequency'],
                                                  sample_mode=daq.AcquisitionType.FINITE,
                                                  samps_per_chan=n_in_samples)
+            analog_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
+                                                                       n_in_pre_samples,
+                                                                       trigger_edge=daq.Edge.RISING)
+            # analog_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
+            #                                                          trigger_edge=daq.Edge.RISING)
+
             reader = AnalogMultiChannelReader(analog_in.in_stream)
             self.aidata = np.zeros((6, n_in_samples), dtype=np.float64)
 
             # digital input
-            n_in_dig_samples = int(self.duration * self.params['DAQ', 'Input', 'Digital sampling frequency'])
+            n_in_dig_samples = int(totaldur * self.params['DAQ', 'Input', 'Digital sampling frequency'])
+            n_in_dig_pre_samples = int(self.params['DAQ', 'Pretrigger duration'] *
+                                   self.params['DAQ', 'Input', 'Digital sampling frequency'])
 
             digital_in.di_channels.add_di_chan(self.params['DAQ', 'Input', 'Digital input port'], '',
                                                line_grouping=daq.LineGrouping.CHAN_FOR_ALL_LINES)
             digital_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Digital sampling frequency'],
                                                   sample_mode=daq.AcquisitionType.FINITE,
                                                   samps_per_chan=n_in_dig_samples)
-            digital_in.triggers.start_trigger.cfg_dig_edge_start_trig("ai/StartTrigger",
-                                                                      trigger_edge=daq.Edge.RISING)
+            digital_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
+                                                                        n_in_dig_pre_samples,
+                                                                        trigger_edge=daq.Edge.RISING)
+            # digital_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
+            #                                                           trigger_edge=daq.Edge.RISING)
             digital_reader = DigitalSingleChannelReader(digital_in.in_stream)
             self.didata = np.zeros(n_in_dig_samples, dtype=np.uint32)
 
@@ -95,7 +108,7 @@ class Twiddle(object):
                                                            duty_cycle=0.5)
             counter_out.timing.cfg_implicit_timing(sample_mode=daq.AcquisitionType.FINITE,
                                                    samps_per_chan=len(self.duty))
-            counter_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
+            counter_out.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Reference trigger'],
                                                                        trigger_edge=daq.Edge.RISING)
 
             counter_writer = CounterWriter(counter_out.out_stream)
@@ -105,21 +118,22 @@ class Twiddle(object):
             try:
                 counter_out.start()
                 digital_in.start()
-                self.startTime = datetime.now()
 
                 analog_in.start()
 
-                analog_in.wait_until_done(10)
+                analog_in.wait_until_done(60)
+                self.endTime = datetime.now()
+
                 reader.read_many_sample(self.aidata)
                 digital_reader.read_many_sample_port_uint32(self.didata)
             finally:
                 digital_out.write([True, False], auto_start=True)
 
             self.tin = np.arange(0, n_in_samples) / self.params['DAQ', 'Input', 'Sampling frequency']
-            self.tin -= self.params['Movement', 'Wait before and after']
+            self.tin -= self.params['Movement', 'Wait before and after'] + self.params['DAQ', 'Pretrigger duration']
 
             self.tdig = np.arange(0, n_in_dig_samples) / self.params['DAQ', 'Input', 'Digital sampling frequency']
-            self.tdig -= self.params['Movement', 'Wait before and after']
+            self.tdig -= self.params['Movement', 'Wait before and after'] + self.params['DAQ', 'Pretrigger duration']
 
             self.forces = np.dot(self.aidata.T, self.calibration).T
             self.pwm = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'PWM return line']) > 0
@@ -153,7 +167,7 @@ class Twiddle(object):
             self.incrementFileNum(self.filename)
 
         with h5py.File(self.filename, 'w') as F:
-            F.attrs['StartTime'] = self.startTime.strftime('%Y-%m-%d %H:%M:%S %Z')
+            F.attrs['EndTime'] = self.endTime.strftime('%Y-%m-%d %H:%M:%S %Z')
 
             # save the input data
             gin = F.create_group('RawInput')
@@ -232,6 +246,21 @@ def main():
         ax[0].plot(twiddle.tout, twiddle.pos)
         ax[1].plot(twiddle.tin, twiddle.forces[5, :])
         ax[2].plot(twiddle.tin, twiddle.forces[0, :])
+
+        ispulse = np.insert(np.logical_and(twiddle.V3Vpulse[1:],
+                            np.logical_not(twiddle.V3Vpulse[:-1])), 0, False)
+        tpulse = twiddle.tdig[ispulse]
+        dtpulse = np.insert(np.diff(tpulse), 0, np.nan)
+        frnum = ['{}'.format(i) for i in range(1, len(tpulse)+1)]
+
+        fig, ax = plt.subplots(3,1, sharex=True)
+        ax[0].plot(twiddle.tout, twiddle.pos)
+        yl = ax[0].get_ylim()
+        for fr, t1 in enumerate(tpulse):
+            ax[0].axvline(x=t1)
+            ax[0].annotate(str(fr+1), xy=(t1, yl[1]), horizontalalignment='center', verticalalignment='top')
+        ax[1].plot(twiddle.tdig, twiddle.V3Vpulse)
+        ax[2].plot(tpulse, dtpulse, 'o')
 
         plt.show()
 
