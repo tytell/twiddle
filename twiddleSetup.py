@@ -28,7 +28,7 @@ parameters = [
     ]},
 
     {'name': 'DAQ', 'type': 'group', 'children': [
-        {'name': 'Reference trigger', 'type': 'list', 'values': ['None', 'Dev1/PFI0'], 'value': 'Dev1/PFI0'},
+        {'name': 'Reference trigger', 'type': 'list', 'values': ['None', 'PFI0'], 'value': 'PFI0'},
         {'name': 'Pretrigger duration', 'type': 'float', 'value': 0.5, 'step': 0.1, 'suffix': 'sec'},
         {'name': 'Input', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 1000.0, 'step': 500.0, 'siPrefix': True,
