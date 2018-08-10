@@ -47,6 +47,66 @@ class Twiddle(object):
         self.tout = np.arange(0, self.duration, dt)
         self.tout -= movement['Wait before and after']
 
+        if self.params['Motor', 'Control'] == 'Velocity':
+            self.vel = 2*np.pi * movement['Frequency'] * movement['Position amplitude'] * \
+                np.cos(2 * np.pi * movement['Frequency'] * self.tout)
+            self.vel[self.tout < 0] = 0
+            self.vel[self.tout > movedur] = 0
+
+            self.pos = movement['Position amplitude'] * np.sin(2 * np.pi * movement['Frequency'] * self.tout)
+            self.pos[self.tout < 0] = 0
+            self.pos[self.tout > movement['Cycles'] / movement['Frequency']] = 0
+
+            self.torque = None
+
+            maxvel = self.params['Motor', 'Maximum speed']      # in RPM
+            maxvel *= 360.0 / 60.0          # convert to deg/s
+
+            self.duty = self.vel / maxvel / 2 + 0.5
+        elif self.params['Motor', 'Control'] == 'Torque':
+            self.torque = movement['Torque amplitude'] * \
+                np.cos(2 * np.pi * movement['Frequency'] * self.tout)
+            self.torque[self.tout < 0] = 0
+            self.torque[self.tout > movedur] = 0
+
+            self.pos = None
+            self.vel = None
+
+            maxtorque = self.params['Motor', 'Maximum torque']      # in percent of max
+
+            self.duty = self.torque / maxtorque / 2 + 0.5
+
+        self.freq = np.ones_like(self.duty) * self.params['Motor', 'Pulse frequency']
+
+        self.inhibit = np.zeros_like(self.tout, dtype=np.bool)
+        self.inhibit[-10:] = True
+
+        self.enable = np.ones_like(self.tout, dtype=np.bool)
+        self.enable[self.tout < -0.5] = False
+        self.enable[self.tout > movedur+0.5] = False
+        self.enable[-2:] = False
+
+        self.led = np.zeros_like(self.tout, dtype=np.bool)
+        nled = int(np.round(self.params['DAQ', 'Output', 'LED pulse duration'] *
+                            self.params['Motor', 'Pulse frequency']))
+        for i in range(int(movement['Cycles'])+1):
+            k = first(self.tout >= float(i) / movement['Frequency'])
+            if k:
+                self.led[k:k+nled] = True
+
+    def generate_freq_sweep(self):
+        movement = self.params.child('Movement')
+
+        self.duration = 2*movement['Wait before and after'] + \
+                        movement['Duration']
+        movedur = movement['Duration']
+
+        dt = 1.0/self.params['Motor', 'Pulse frequency']
+        self.tout = np.arange(0, self.duration, dt)
+        self.tout -= movement['Wait before and after']
+
+        dfreq = (movement['End frequency'] - movement['Frequency']) / self.duration
+
         self.vel = 2*np.pi * movement['Frequency'] * movement['Amplitude'] * \
             np.cos(2 * np.pi * movement['Frequency'] * self.tout)
         self.vel[self.tout < 0] = 0
@@ -77,7 +137,6 @@ class Twiddle(object):
             k = first(self.tout >= float(i) / movement['Frequency'])
             if k:
                 self.led[k:k+nled] = True
-
 
     def run(self):
         self.digital_out_data = np.zeros_like(self.tout, dtype=np.uint32)
@@ -263,11 +322,16 @@ class Twiddle(object):
             # save the parameters for generating the stimulus
             gout = F.create_group('NominalStimulus')
             gout.create_dataset('t', data=self.tout)
-            gout.create_dataset('Position', data=self.pos)
-            gout.create_dataset('Velocity', data=self.vel)
+            if self.pos is not None:
+                gout.create_dataset('Position', data=self.pos)
+                gout.create_dataset('Velocity', data=self.vel)
+            elif self.torque is not None:
+                gout.create_dataset('Torque', data=self.torque)
 
             movement = self.params.child('Movement')
-            gout.attrs['Amplitude'] = movement['Amplitude']
+            gout.attrs['MotorControl'] = self.params['Motor','Control']
+            gout.attrs['PositionAmplitude'] = movement['Position amplitude']
+            gout.attrs['TorqueAmplitude'] = movement['Torque amplitude']
             gout.attrs['Frequency'] = movement['Frequency']
             gout.attrs['Cycles'] = movement['Cycles']
             gout.attrs['WaitPrePost'] = movement['Wait before and after']
@@ -323,7 +387,12 @@ def main():
         forcessm = signal.sosfiltfilt(sos, twiddle.forces, axis=-1)
 
         fig, ax = plt.subplots(7,1, sharex=True)
-        ax[0].plot(twiddle.tout, twiddle.pos)
+        if twiddle.pos is not None:
+            ax[0].plot(twiddle.tout, twiddle.pos)
+            ax[0].set_ylabel('Position (deg)')
+        elif twiddle.torque is not None:
+            ax[0].plot(twiddle.tout, twiddle.torque)
+            ax[0].set_ylabel('Torque (%)')
 
         for ax1, f1, lab1 in zip(ax[1:], forcessm, ['Fx', 'Fy', 'Fz', 'Tx', 'Ty', 'Tz']):
             ax1.plot(twiddle.tin, f1, label=lab1)
@@ -400,9 +469,17 @@ def main():
             islater = [vidtime > endTime for vidtime in vidtimes]
 
         if not any(islater):
-            QtWidgets.QMessageBox.information(None, 'Video file', 'Could not find current video file')
+            ind = np.argmin(endTime - np.array(vidtimes))
+            if endTime - vidtimes[ind] < 60:
+                QtWidgets.QMessageBox.information(None, 'Video file',
+                                                  'Taking file from {} sec ago'.format(endTime - vidtimes[ind]))
+            else:
+                QtWidgets.QMessageBox.information(None, 'Video file', 'Could not find current video file')
+                ind = None
         else:
             ind = np.argmax(np.array(vidtimes) * np.array(islater).astype(np.float))
+
+        if ind is not None:
             vidfile = vidfiles[ind]
             _, vidfileext = os.path.splitext(vidfile)
 

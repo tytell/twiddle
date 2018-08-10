@@ -21,9 +21,14 @@ parameters = [
     {'name': 'Debug timing', 'type': 'bool', 'value': False},
 
     {'name': 'Movement', 'type': 'group', 'children': [
-        {'name': 'Amplitude', 'type': 'float', 'value': 20.0, 'step': 5.0, 'suffix': 'deg'},
+        #{'name': 'Type', 'type': 'list', 'values': ['Constant frequency', 'Frequency sweep'],
+        # 'value': 'Constant frequency'},
+        {'name': 'Position amplitude', 'type': 'float', 'value': 20.0, 'step': 5.0, 'suffix': 'deg'},
+        {'name': 'Torque amplitude', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': '%'},
         {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Cycles', 'type': 'float', 'value': 3.0, 'step': 0.5},
+        #{'name': 'Duration', 'type': 'float', 'value': 30.0, 'suffix': 'sec', 'step': 5},
+        #{'name': 'End frequency', 'type': 'float', 'value': 5.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Wait before and after', 'type': 'float', 'value': 1.0, 'step': 0.5, 'suffix': 'sec'},
     ]},
 
@@ -61,7 +66,10 @@ parameters = [
         ]},
     ]},
     {'name': 'Motor', 'type': 'group', 'children': [
+        {'name': 'Control', 'type': 'list', 'values': ['Velocity', 'Torque'],
+         'value': 'Velocity'},
         {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
+        {'name': 'Maximum torque', 'type': 'float', 'value': 50.0, 'step': 10.0, 'suffix': '%'},
         {'name': 'Pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
          'suffix': 'Hz'},
         {'name': 'Sign convention', 'type': 'list', 'values': ['Left is positive', 'Left is negative', 'None'],
