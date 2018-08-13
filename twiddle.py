@@ -13,7 +13,7 @@ from nidaqmx import Task
 from PyQt5 import QtWidgets, QtCore
 
 import numpy as np
-from scipy import signal
+from scipy import signal, interpolate
 import matplotlib.pyplot as plt
 
 import h5py
@@ -386,7 +386,7 @@ def main():
         sos = signal.butter(5, Wn, output='sos')
         forcessm = signal.sosfiltfilt(sos, twiddle.forces, axis=-1)
 
-        fig, ax = plt.subplots(7,1, sharex=True)
+        fig, ax = plt.subplots(8,1, sharex=True)
         if twiddle.pos is not None:
             ax[0].plot(twiddle.tout, twiddle.pos)
             ax[0].set_ylabel('Position (deg)')
@@ -397,6 +397,14 @@ def main():
         for ax1, f1, lab1 in zip(ax[1:], forcessm, ['Fx', 'Fy', 'Fz', 'Tx', 'Ty', 'Tz']):
             ax1.plot(twiddle.tin, f1, label=lab1)
             ax1.set_ylabel(lab1)
+
+        # if twiddle.vel is not None:
+        #     span = np.logical_and(twiddle.tin >= twiddle.tout[0],
+        #                           twiddle.tin <= twiddle.tout[-1])
+        #     vel1 = np.zeros_like(twiddle.tin)
+        #     vel1[span] = interpolate.interp1d(twiddle.tout, twiddle.vel, assume_sorted=True)(twiddle.tin[span])
+        #     power = forcessm[5, :] * vel1
+        #     ax[-1].plot(twiddle.tin, power)
 
         # fy = twiddle.forces[1, :]
         # wind = 100
