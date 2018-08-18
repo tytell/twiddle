@@ -215,27 +215,33 @@ class Twiddle(object):
             self.didata = np.zeros(n_in_dig_samples, dtype=np.uint32)
 
             # counter output
-            counter_out.co_channels.add_co_pulse_chan_freq(self.params['DAQ', 'Output', 'Counter name'],
-                                                           units=daq.FrequencyUnits.HZ,
-                                                           idle_state=daq.Level.LOW, initial_delay=0.0,
-                                                           freq=self.params['Motor', 'Pulse frequency'],
-                                                           duty_cycle=0.5)
-            counter_out.timing.cfg_implicit_timing(sample_mode=daq.AcquisitionType.FINITE,
-                                                   samps_per_chan=len(self.duty))
-            if trig is not None:
-                counter_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
-                                                                           trigger_edge=daq.Edge.RISING)
+            if self.params['Movement', 'Position amplitude'] != 0:
+                counter_out.co_channels.add_co_pulse_chan_freq(self.params['DAQ', 'Output', 'Counter name'],
+                                                               units=daq.FrequencyUnits.HZ,
+                                                               idle_state=daq.Level.LOW, initial_delay=0.0,
+                                                               freq=self.params['Motor', 'Pulse frequency'],
+                                                               duty_cycle=0.5)
+                counter_out.timing.cfg_implicit_timing(sample_mode=daq.AcquisitionType.FINITE,
+                                                       samps_per_chan=len(self.duty))
+                if trig is not None:
+                    counter_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
+                                                                               trigger_edge=daq.Edge.RISING)
+                else:
+                    counter_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
+                                                                               trigger_edge=daq.Edge.RISING)
+
+                counter_writer = CounterWriter(counter_out.out_stream)
+
+                counter_writer.write_many_sample_pulse_frequency(self.freq, self.duty)
+
+                iscounter = True
             else:
-                counter_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
-                                                                           trigger_edge=daq.Edge.RISING)
-
-            counter_writer = CounterWriter(counter_out.out_stream)
-
-            counter_writer.write_many_sample_pulse_frequency(self.freq, self.duty)
+                iscounter = False
 
             try:
                 digital_out.start()
-                counter_out.start()
+                if iscounter:
+                    counter_out.start()
                 digital_in.start()
 
                 analog_in.start()
