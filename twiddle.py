@@ -302,7 +302,7 @@ class Twiddle(object):
             gin.attrs['SampleFrequency'] = self.params['DAQ', 'Input', 'Sampling frequency']
             for i, aichan in enumerate(['SG0', 'SG1', 'SG2', 'SG3', 'SG4', 'SG5']):
                 dset = gin.create_dataset(aichan, data=self.aidata[i, :])
-                dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', aichan]
+                dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', aichan].encode('ASCII')
 
             gin = F.create_group('Calibrated')
             gin.attrs['SampleFrequency'] = self.params['DAQ', 'Input', 'Sampling frequency']
@@ -313,16 +313,16 @@ class Twiddle(object):
             gin = F.create_group('DigitalInput')
             gin.attrs['SampleFrequency'] = self.params['DAQ', 'Input', 'Digital sampling frequency']
             dset = gin.create_dataset('PWMreturn', data=self.pwm)
-            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port']
+            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port'].encode('ASCII')
             dset.attrs['Line'] = self.params['DAQ', 'Input', 'PWM return line']
             dset = gin.create_dataset('V3Vpulse', data=self.V3Vpulse)
-            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port']
+            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port'].encode('ASCII')
             dset.attrs['Line'] = self.params['DAQ', 'Input', 'V3V pulse line']
             dset = gin.create_dataset('V3Vpulse2', data=self.V3Vpulse2)
-            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port']
+            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port'].encode('ASCII')
             dset.attrs['Line'] = self.params['DAQ', 'Input', 'V3V pulse2']
             dset = gin.create_dataset('V3Vpulse3', data=self.V3Vpulse3)
-            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port']
+            dset.attrs['HardwareChannel'] = self.params['DAQ', 'Input', 'Digital input port'].encode('ASCII')
             dset.attrs['Line'] = self.params['DAQ', 'Input', 'V3V pulse3']
 
             # save the parameters for generating the stimulus
@@ -335,7 +335,7 @@ class Twiddle(object):
                 gout.create_dataset('Torque', data=self.torque)
 
             movement = self.params.child('Movement')
-            gout.attrs['MotorControl'] = self.params['Motor','Control']
+            gout.attrs['MotorControl'] = self.params['Motor','Control'].encode('ASCII')
             gout.attrs['PositionAmplitude'] = movement['Position amplitude']
             gout.attrs['TorqueAmplitude'] = movement['Torque amplitude']
             gout.attrs['Frequency'] = movement['Frequency']
@@ -361,7 +361,7 @@ class Twiddle(object):
                     continue
             elif ch.type() in ['list', 'str']:
                 try:
-                    group.attrs.create(ch.name(), str(ch.value()))
+                    group.attrs.create(ch.name(), ch.value().encode('ASCII'))
                 except TypeError as err:
                     errstr = "Error saving {} = {}: {}".format(ch.name(), ch.value(), err)
                     logging.warning(errstr)
@@ -469,6 +469,9 @@ def main():
         vidfilestr = os.path.join(twiddle.params['Video file directory'], twiddle.params['Video file base name'])
         vidfiles = glob(vidfilestr)
         vidtimes = [os.path.getmtime(vidfile) for vidfile in vidfiles]
+
+        if len(vidfiles) == 0:
+            return
 
         endTime = time.mktime(twiddle.endTime.timetuple())
         islater = [vidtime > endTime for vidtime in vidtimes]
