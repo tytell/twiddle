@@ -6,9 +6,11 @@ import time
 from glob import glob
 
 import nidaqmx.constants as daq
-from nidaqmx.stream_writers import CounterWriter, DigitalSingleChannelWriter
-from nidaqmx.stream_readers import AnalogMultiChannelReader, DigitalSingleChannelReader
 from nidaqmx import Task
+from nidaqmx.stream_writers import DigitalSingleChannelWriter, CounterWriter
+from nidaqmx.stream_readers import AnalogMultiChannelReader, DigitalSingleChannelReader
+from nidaqmx.errors import DaqError
+# import nidaqmx
 
 from PyQt5 import QtWidgets, QtCore
 
@@ -154,91 +156,94 @@ class Twiddle(object):
             trig = self.params['DAQ', 'Reference trigger'].lower()
             pretrigdur = self.params['DAQ', 'Pretrigger duration']
 
-        with Task() as counter_out, Task() as digital_out, Task() as analog_in, Task() as digital_in:
-            # digital output
-            digital_out.do_channels.add_do_chan(self.params['DAQ', 'Output', 'Digital port'],
-                                                line_grouping=daq.LineGrouping.CHAN_FOR_ALL_LINES)
-            digital_out.timing.cfg_samp_clk_timing(self.params['Motor', 'Pulse frequency'],
-                                                   sample_mode=daq.AcquisitionType.FINITE,
-                                                   samps_per_chan=len(self.digital_out_data))
-            if trig is None:
-                digital_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
-                                                                           trigger_edge=daq.Edge.RISING)
-            else:
-                digital_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
-                                                                       trigger_edge=daq.Edge.RISING)
-            # order is inhibit then enable
-            # digital_out.write([False, True], auto_start=True)
-            digital_writer = DigitalSingleChannelWriter(digital_out.out_stream)
-            digital_writer.write_many_sample_port_uint32(self.digital_out_data)
-
-            totaldur = self.duration + pretrigdur
-            # analog input
-            n_in_samples = int(totaldur * self.params['DAQ', 'Input', 'Sampling frequency'])
-            n_in_pre_samples = int(pretrigdur * self.params['DAQ', 'Input', 'Sampling frequency'])
-
-            aichans = [self.params['DAQ','Input', c] for c in ['SG0', 'SG1', 'SG2', 'SG3', 'SG4', 'SG5']]
-            for aichan1 in aichans:
-                analog_in.ai_channels.add_ai_voltage_chan(aichan1)
-            analog_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Sampling frequency'],
-                                                 sample_mode=daq.AcquisitionType.FINITE,
-                                                 samps_per_chan=n_in_samples)
-            if trig is not None:
-                analog_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
-                                                                           n_in_pre_samples,
-                                                                           trigger_edge=daq.Edge.RISING)
-            # analog_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
-            #                                                          trigger_edge=daq.Edge.RISING)
-
-            reader = AnalogMultiChannelReader(analog_in.in_stream)
-            self.aidata = np.zeros((6, n_in_samples), dtype=np.float64)
-
-            # digital input
-            n_in_dig_samples = int(totaldur * self.params['DAQ', 'Input', 'Digital sampling frequency'])
-            n_in_dig_pre_samples = int(pretrigdur * self.params['DAQ', 'Input', 'Digital sampling frequency'])
-
-            digital_in.di_channels.add_di_chan(self.params['DAQ', 'Input', 'Digital input port'], '',
-                                               line_grouping=daq.LineGrouping.CHAN_FOR_ALL_LINES)
-            digital_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Digital sampling frequency'],
-                                                  sample_mode=daq.AcquisitionType.FINITE,
-                                                  samps_per_chan=n_in_dig_samples)
-            if trig is not None:
-                digital_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
-                                                                            n_in_dig_pre_samples,
-                                                                            trigger_edge=daq.Edge.RISING)
-            else:
-                digital_in.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
-                                                                          trigger_edge=daq.Edge.RISING)
-            # digital_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
-            #                                                           trigger_edge=daq.Edge.RISING)
-            digital_reader = DigitalSingleChannelReader(digital_in.in_stream)
-            self.didata = np.zeros(n_in_dig_samples, dtype=np.uint32)
-
-            # counter output
-            if self.params['Movement', 'Position amplitude'] != 0:
-                counter_out.co_channels.add_co_pulse_chan_freq(self.params['DAQ', 'Output', 'Counter name'],
-                                                               units=daq.FrequencyUnits.HZ,
-                                                               idle_state=daq.Level.LOW, initial_delay=0.0,
-                                                               freq=self.params['Motor', 'Pulse frequency'],
-                                                               duty_cycle=0.5)
-                counter_out.timing.cfg_implicit_timing(sample_mode=daq.AcquisitionType.FINITE,
-                                                       samps_per_chan=len(self.duty))
-                if trig is not None:
-                    counter_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
+        try:
+            with Task() as counter_out, \
+                    Task() as digital_out, \
+                    Task() as analog_in, \
+                    Task() as digital_in:
+                # digital output
+                digital_out.do_channels.add_do_chan(self.params['DAQ', 'Output', 'Digital port'],
+                                                    line_grouping=daq.LineGrouping.CHAN_FOR_ALL_LINES)
+                digital_out.timing.cfg_samp_clk_timing(self.params['Motor', 'Pulse frequency'],
+                                                       sample_mode=daq.AcquisitionType.FINITE,
+                                                       samps_per_chan=len(self.digital_out_data))
+                if trig is None:
+                    digital_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
                                                                                trigger_edge=daq.Edge.RISING)
                 else:
-                    counter_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
+                    digital_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
                                                                                trigger_edge=daq.Edge.RISING)
+                # order is inhibit then enable
+                # digital_out.write([False, True], auto_start=True)
+                digital_writer = DigitalSingleChannelWriter(digital_out.out_stream)
+                digital_writer.write_many_sample_port_uint32(self.digital_out_data)
 
-                counter_writer = CounterWriter(counter_out.out_stream)
+                totaldur = self.duration + pretrigdur
+                # analog input
+                n_in_samples = int(totaldur * self.params['DAQ', 'Input', 'Sampling frequency'])
+                n_in_pre_samples = int(pretrigdur * self.params['DAQ', 'Input', 'Sampling frequency'])
 
-                counter_writer.write_many_sample_pulse_frequency(self.freq, self.duty)
+                aichans = [self.params['DAQ','Input', c] for c in ['SG0', 'SG1', 'SG2', 'SG3', 'SG4', 'SG5']]
+                for aichan1 in aichans:
+                    analog_in.ai_channels.add_ai_voltage_chan(aichan1)
+                analog_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Sampling frequency'],
+                                                     sample_mode=daq.AcquisitionType.FINITE,
+                                                     samps_per_chan=n_in_samples)
+                if trig is not None:
+                    analog_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
+                                                                               n_in_pre_samples,
+                                                                               trigger_edge=daq.Edge.RISING)
+                # analog_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
+                #                                                          trigger_edge=daq.Edge.RISING)
 
-                iscounter = True
-            else:
-                iscounter = False
+                reader = AnalogMultiChannelReader(analog_in.in_stream)
+                self.aidata = np.zeros((6, n_in_samples), dtype=np.float64)
 
-            try:
+                # digital input
+                n_in_dig_samples = int(totaldur * self.params['DAQ', 'Input', 'Digital sampling frequency'])
+                n_in_dig_pre_samples = int(pretrigdur * self.params['DAQ', 'Input', 'Digital sampling frequency'])
+
+                digital_in.di_channels.add_di_chan(self.params['DAQ', 'Input', 'Digital input port'], '',
+                                                   line_grouping=daq.LineGrouping.CHAN_FOR_ALL_LINES)
+                digital_in.timing.cfg_samp_clk_timing(self.params['DAQ', 'Input', 'Digital sampling frequency'],
+                                                      sample_mode=daq.AcquisitionType.FINITE,
+                                                      samps_per_chan=n_in_dig_samples)
+                if trig is not None:
+                    digital_in.triggers.reference_trigger.cfg_dig_edge_ref_trig(self.params['DAQ', 'Reference trigger'],
+                                                                                n_in_dig_pre_samples,
+                                                                                trigger_edge=daq.Edge.RISING)
+                else:
+                    digital_in.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
+                                                                              trigger_edge=daq.Edge.RISING)
+                # digital_in.triggers.start_trigger.cfg_dig_edge_start_trig(self.params['DAQ', 'Start trigger'],
+                #                                                           trigger_edge=daq.Edge.RISING)
+                digital_reader = DigitalSingleChannelReader(digital_in.in_stream)
+                self.didata = np.zeros(n_in_dig_samples, dtype=np.uint32)
+
+                # counter output
+                if self.params['Movement', 'Position amplitude'] != 0:
+                    counter_out.co_channels.add_co_pulse_chan_freq(self.params['DAQ', 'Output', 'Counter name'],
+                                                                   units=daq.FrequencyUnits.HZ,
+                                                                   idle_state=daq.Level.LOW, initial_delay=0.0,
+                                                                   freq=self.params['Motor', 'Pulse frequency'],
+                                                                   duty_cycle=0.5)
+                    counter_out.timing.cfg_implicit_timing(sample_mode=daq.AcquisitionType.FINITE,
+                                                           samps_per_chan=len(self.duty))
+                    if trig is not None:
+                        counter_out.triggers.start_trigger.cfg_dig_edge_start_trig(trig,
+                                                                                   trigger_edge=daq.Edge.RISING)
+                    else:
+                        counter_out.triggers.start_trigger.cfg_dig_edge_start_trig('ai/StartTrigger',
+                                                                                   trigger_edge=daq.Edge.RISING)
+
+                    counter_writer = CounterWriter(counter_out.out_stream)
+
+                    counter_writer.write_many_sample_pulse_frequency(self.freq, self.duty)
+
+                    iscounter = True
+                else:
+                    iscounter = False
+
                 digital_out.start()
                 if iscounter:
                     counter_out.start()
@@ -251,21 +256,23 @@ class Twiddle(object):
 
                 reader.read_many_sample(self.aidata)
                 digital_reader.read_many_sample_port_uint32(self.didata)
-            finally:
-                pass
-                # digital_out.write([True, False], auto_start=True)
+        except DaqError as daqerr:
+            QtWidgets.QMessageBox.critical(None, 'Error', str(daqerr))
+        finally:
+            pass
+            # digital_out.write([True, False], auto_start=True)
 
-            self.tin = np.arange(0, n_in_samples) / self.params['DAQ', 'Input', 'Sampling frequency']
-            self.tin -= self.params['Movement', 'Wait before and after'] + pretrigdur
+        self.tin = np.arange(0, n_in_samples) / self.params['DAQ', 'Input', 'Sampling frequency']
+        self.tin -= self.params['Movement', 'Wait before and after'] + pretrigdur
 
-            self.tdig = np.arange(0, n_in_dig_samples) / self.params['DAQ', 'Input', 'Digital sampling frequency']
-            self.tdig -= self.params['Movement', 'Wait before and after'] + pretrigdur
+        self.tdig = np.arange(0, n_in_dig_samples) / self.params['DAQ', 'Input', 'Digital sampling frequency']
+        self.tdig -= self.params['Movement', 'Wait before and after'] + pretrigdur
 
-            self.forces = np.dot(self.aidata.T, self.calibration).T
-            self.pwm = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'PWM return line']) > 0
-            self.V3Vpulse = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse line']) > 0
-            self.V3Vpulse2 = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse2']) > 0
-            self.V3Vpulse3 = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse3']) > 0
+        self.forces = np.dot(self.aidata.T, self.calibration).T
+        self.pwm = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'PWM return line']) > 0
+        self.V3Vpulse = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse line']) > 0
+        self.V3Vpulse2 = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse2']) > 0
+        self.V3Vpulse3 = np.bitwise_and(self.didata, 2**self.params['DAQ', 'Input', 'V3V pulse3']) > 0
 
     def incrementFileNum(self, filename):
         m = re.search('(\d+)\.h5', filename)
